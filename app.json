@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "EatBetter",
+    "slug": "eatbetter-case-study",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "eatbetter",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-image-picker",
+      "expo-camera"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.anonymous.eatbetter-case-study"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F2EA"
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "output": "static"
+    }
+  }
+}

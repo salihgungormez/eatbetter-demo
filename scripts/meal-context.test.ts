@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { inferMealContext, getRecentMeals, getTodayMeals } from '@/services/meal-context';
+import { derivePersonalFoodPatterns } from '@/services/personal-profile';
+
+const now = new Date(2026, 7, 15, 13, 20);
+const todayMeal = { id: '1', name: 'Kahvaltı tabağı', mealType: 'breakfast' as const, items: [], createdAt: new Date(2026, 7, 15, 9, 10).toISOString() };
+const yesterdayMeal = { ...todayMeal, id: '2', createdAt: new Date(2026, 7, 14, 13, 10).toISOString() };
+assert.equal(getTodayMeals([todayMeal, yesterdayMeal], now).length, 1, 'only today meals are used as context');
+const context = inferMealContext(now, [todayMeal, yesterdayMeal]);
+assert.equal(context.mealType, 'lunch', '13:20 is classified as lunch');
+assert.match(context.reason, /öğle/i, 'context explains the time window');
+assert.equal(context.todayMeals.length, 1, 'yesterday does not influence today context');
+assert.equal(context.isFirstMeal, false, 'an existing meal means this is not the first meal');
+assert.equal(context.recentMeals.length, 2, 'recent meal history includes today and yesterday');
+assert.deepEqual(context.recentMeals[0].items, [], 'history remains compact when no ingredients are present');
+const oldMeal = { ...todayMeal, id: '3', createdAt: new Date(2026, 6, 1, 9, 10).toISOString() };
+assert.equal(getRecentMeals([oldMeal], now).length, 0, 'old meals are excluded from the bounded AI history');
+const lateFirstMeal = inferMealContext(now, []);
+assert.equal(lateFirstMeal.isFirstMeal, true, 'no meals today marks a late first meal');
+assert.match(lateFirstMeal.reason, /ilk öğünü|brunch/i, 'late first meal is explained separately from clock time');
+assert.equal(inferMealContext(new Date(2026, 7, 15, 2, 0), []).mealType, 'snack', 'overnight hours fall back to snack');
+const breakfast = (day: number, items: Array<{ name: string; amount: number }>) => ({ id: `breakfast-${day}`, name: 'Kahvaltı', mealType: 'breakfast' as const, createdAt: new Date(2026, 7, day, 9, 0).toISOString(), items: items.map((item, index) => ({ id: `${day}-${index}`, ...item, unit: 'g' as const, calories: 100, protein: 5, carbs: 5, fat: 3, confidence: 0.9, correctedByUser: false })) });
+const repeatedBreakfasts = [breakfast(1, [{ name: 'Yumurta', amount: 50 }, { name: 'Ekmek', amount: 30 }]), breakfast(5, [{ name: 'Yumurta', amount: 52 }, { name: 'Ekmek', amount: 30 }]), breakfast(9, [{ name: 'Yumurta', amount: 48 }, { name: 'Ekmek', amount: 30 }]), breakfast(13, [{ name: 'Yumurta', amount: 50 }])];
+const patterns = derivePersonalFoodPatterns(repeatedBreakfasts, new Date(2026, 7, 15, 12, 0));
+assert.equal(patterns.find((pattern) => pattern.canonicalName === 'yumurta')?.frequency, 1, 'frequent food reaches 100 percent');
+assert.equal(patterns.find((pattern) => pattern.canonicalName === 'yumurta')?.typicalAmount, 50, 'typical amount is calculated locally');
+assert.equal(patterns.find((pattern) => pattern.canonicalName === 'ekmek')?.frequency, 0.75, 'food pattern frequency is based on meal presence');
+assert.equal(derivePersonalFoodPatterns(repeatedBreakfasts.slice(0, 2), new Date(2026, 7, 15, 12, 0)).length, 0, 'insufficient data does not create a personal preference');
+console.log('meal context: ok');
+// Verifies time, late-wake, and recurring-meal history context behavior.
