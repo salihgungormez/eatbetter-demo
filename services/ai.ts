@@ -15,7 +15,12 @@ import {
   VisualMealAnalysis,
   VisualMealAnalysisSchema,
 } from '@/types/visual-meal-analysis';
-import { coverageNeedsRetry, duplicateRegionIds, mergeMissingRegions } from '@/utils/coverage';
+import {
+  applyRegionCorrections,
+  coverageNeedsRetry,
+  duplicateRegionIds,
+  mergeMissingRegions,
+} from '@/utils/coverage';
 import { MealContext, mealContextPrompt } from '@/services/meal-context';
 import { applyControlledNutrition } from '@/services/nutrition';
 import { localizeFoodName, localizeMealName } from '@/utils/localization';
@@ -141,10 +146,18 @@ const coverageSchema = {
     complete: { type: 'BOOLEAN' },
     missingRegions: { type: 'ARRAY', items: regionSchema },
     duplicateRegionIds: { type: 'ARRAY', items: { type: 'STRING' } },
+    regionCorrections: { type: 'ARRAY', items: regionSchema },
     inconsistentReferences: { type: 'ARRAY', items: { type: 'STRING' } },
     notes: { type: 'ARRAY', items: { type: 'STRING' } },
   },
-  required: ['complete', 'missingRegions', 'duplicateRegionIds', 'inconsistentReferences', 'notes'],
+  required: [
+    'complete',
+    'missingRegions',
+    'regionCorrections',
+    'duplicateRegionIds',
+    'inconsistentReferences',
+    'notes',
+  ],
 };
 const nutritionEnrichmentSchema = {
   type: 'OBJECT',
@@ -249,10 +262,28 @@ function normalizeRegion(raw: Record<string, unknown>, index: number): FoodRegio
       )
     : [];
   const status = raw.status === 'recognized' || raw.status === 'ambiguous' ? raw.status : 'unknown';
+  const boundingBox = box(raw.boundingBox as Record<string, unknown> | undefined);
+  const rawAnchor = raw.anchor as Record<string, unknown> | undefined;
+  const normalizedAnchor = point(rawAnchor);
+  const hasAnchor =
+    rawAnchor && Number.isFinite(Number(rawAnchor.x)) && Number.isFinite(Number(rawAnchor.y));
+  const anchorIsInsideBox =
+    hasAnchor &&
+    normalizedAnchor.x >= boundingBox.x &&
+    normalizedAnchor.x <= boundingBox.x + boundingBox.width &&
+    normalizedAnchor.y >= boundingBox.y &&
+    normalizedAnchor.y <= boundingBox.y + boundingBox.height;
+  // Keep the callout attached to its region when the model returns an inconsistent anchor.
+  const anchor = anchorIsInsideBox
+    ? normalizedAnchor
+    : {
+        x: boundingBox.x + boundingBox.width / 2,
+        y: boundingBox.y + boundingBox.height / 2,
+      };
   return {
     id: String(raw.id ?? `region-${index}`),
-    boundingBox: box(raw.boundingBox as Record<string, unknown> | undefined),
-    anchor: point(raw.anchor as Record<string, unknown> | undefined),
+    boundingBox,
+    anchor,
     status,
     selectedCandidateId:
       typeof raw.selectedCandidateId === 'string'
@@ -309,7 +340,7 @@ async function runTwoPassAnalysis(
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const inventoryParts: Array<Record<string, unknown>> = [
       {
-        text: `PASS 1 — VISIBLE FOOD INVENTORY AND UNCERTAINTY. Inspect the entire plate before nutrition. Identify every distinct substantial visible food region: protein, starch/grain, vegetables, sides, separable sauces, meaningful garnish, and unknown food. Focus only inside the plate; ignore monitor, desk, cables and background. One region exactly once; competing labels for the same pixels must be candidates inside that region. Never hide visible food as a hiddenIngredientSuggestion. Do not make final calorie totals in this pass; estimatedGrams and nutritionPer100g are provisional placeholders for schema compatibility and will be replaced only after coverage verification. After inventory, return at most three uncertaintyQuestions, and only for visible-region uncertainty that materially changes calories or macros: ingredient identity or portion size. Ask the smallest useful question with 2–5 concrete options. Do not ask about high-confidence items. Each visible-region question must reference its regionId and candidateId or grams. Put invisible possibilities such as cooking oil in hiddenIngredientSuggestions instead of asking an unanswered question. Return strict JSON with normalized coordinates. ${description?.trim() ? `User description: ${description.trim()}` : ''} ${mealContextPrompt(context)} ${correctionNote}`,
+        text: `PASS 1 — VISIBLE FOOD INVENTORY AND UNCERTAINTY. Inspect the entire plate before nutrition. Identify every distinct substantial visible food region: protein, starch/grain, vegetables, sides, separable sauces, meaningful garnish, and unknown food. Focus only inside the plate; ignore monitor, desk, cables and background. One region exactly once; competing labels for the same pixels must be candidates inside that region. Never hide visible food as a hiddenIngredientSuggestion. Every region anchor must be inside its boundingBox and should point near the visual center of that food region. Keep boundingBox and anchor in the same normalized image coordinate system. Do not make final calorie totals in this pass; estimatedGrams and nutritionPer100g are provisional placeholders for schema compatibility and will be replaced only after coverage verification. After inventory, return at most three uncertaintyQuestions, and only for visible-region uncertainty that materially changes calories or macros: ingredient identity or portion size. Ask the smallest useful question with 2–5 concrete options. Do not ask about high-confidence items. Each visible-region question must reference its regionId and candidateId or grams. Put invisible possibilities such as cooking oil in hiddenIngredientSuggestions instead of asking an unanswered question. Return strict JSON with normalized coordinates between 0 and 1. ${description?.trim() ? `User description: ${description.trim()}` : ''} ${mealContextPrompt(context)} ${correctionNote}`,
       },
     ];
     if (imageBase64)
@@ -319,27 +350,36 @@ async function runTwoPassAnalysis(
     );
     const verifierParts: Array<Record<string, unknown>> = [
       {
-        text: `PASS 2 — COVERAGE VERIFIER. Inspect the image and the inventory JSON below. The input may be a direct meal photo or a test photo of a meal displayed on a computer screen. In either case, inspect the food image/content itself and ignore the surrounding monitor frame, keyboard, desk, cables, and unrelated background. Check every substantial visible food area, especially the main protein and starch. Check whether explanations mention visible food missing from foodRegions, whether two different regions overlap as duplicates, and whether background objects were classified as food. Return strict JSON only. Inventory: ${JSON.stringify(lastInventory)}. ${correctionNote}`,
+        text: `PASS 2 — COVERAGE VERIFIER. Inspect the image and the inventory JSON below. The input may be a direct meal photo or a test photo of a meal displayed on a computer screen. In either case, inspect the food image/content itself and ignore the surrounding monitor frame, keyboard, desk, cables, and unrelated background. Check every substantial visible food area, especially the main protein and starch. Check whether explanations mention visible food missing from foodRegions, whether two different regions overlap as duplicates, whether anchors remain inside their boundingBoxes, and whether background objects were classified as food. If an existing region has the wrong boundingBox or anchor for its label, return one corrected region with the SAME region id and candidate list in regionCorrections. A correction must point directly to the pixels of the named food, and its anchor must be inside its corrected boundingBox. Do not create a second region for a correction. Return strict JSON only. Inventory: ${JSON.stringify(lastInventory)}. ${correctionNote}`,
       },
     ];
     if (imageBase64)
       verifierParts.push({ inline_data: { mime_type: mimeType, data: imageBase64 } });
-    lastVerification = CoverageVerificationSchema.parse(
+    const parsedVerification = CoverageVerificationSchema.parse(
       await requestGemini(apiKey, verifierParts, coverageSchema),
     );
+    lastVerification = {
+      ...parsedVerification,
+      regionCorrections: (parsedVerification.regionCorrections ?? []).map((region, index) =>
+        normalizeRegion(region as unknown as Record<string, unknown>, index),
+      ),
+    };
+    const correctedInventory = applyRegionCorrections(lastInventory, lastVerification);
     const duplicates = [
       ...new Set([
         ...lastVerification.duplicateRegionIds,
-        ...duplicateRegionIds(lastInventory.foodRegions),
+        ...duplicateRegionIds(correctedInventory.foodRegions),
       ]),
     ];
-    if (!coverageNeedsRetry(lastInventory, { ...lastVerification, duplicateRegionIds: duplicates }))
-      return { inventory: lastInventory, verification: lastVerification };
-    correctionNote = `Previous verifier findings must be fixed: missing=${JSON.stringify(lastVerification.missingRegions)}, duplicates=${JSON.stringify(duplicates)}, inconsistent=${JSON.stringify(lastVerification.inconsistentReferences)}, notes=${JSON.stringify(lastVerification.notes)}.`;
+    const correctedVerification = { ...lastVerification, duplicateRegionIds: duplicates };
+    if (!coverageNeedsRetry(correctedInventory, correctedVerification))
+      return { inventory: correctedInventory, verification: correctedVerification };
+    correctionNote = `Previous verifier findings must be fixed: missing=${JSON.stringify(lastVerification.missingRegions)}, corrections=${JSON.stringify(lastVerification.regionCorrections ?? [])}, duplicates=${JSON.stringify(duplicates)}, inconsistent=${JSON.stringify(lastVerification.inconsistentReferences)}, notes=${JSON.stringify(lastVerification.notes)}.`;
   }
   if (!lastInventory || !lastVerification)
     throw new Error('Coverage pipeline did not return a result');
-  const merged = mergeMissingRegions(lastInventory, lastVerification);
+  const correctedInventory = applyRegionCorrections(lastInventory, lastVerification);
+  const merged = mergeMissingRegions(correctedInventory, lastVerification);
   const duplicates = [
     ...new Set([...lastVerification.duplicateRegionIds, ...duplicateRegionIds(merged)]),
   ];

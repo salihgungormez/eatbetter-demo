@@ -4,6 +4,12 @@ import { isRegionInsidePlate } from '@/utils/food-regions';
 
 export function sameRegion(a: FoodRegion, b: FoodRegion): boolean { const ax = Math.max(a.boundingBox.x, b.boundingBox.x); const ay = Math.max(a.boundingBox.y, b.boundingBox.y); const bx = Math.min(a.boundingBox.x + a.boundingBox.width, b.boundingBox.x + b.boundingBox.width); const by = Math.min(a.boundingBox.y + a.boundingBox.height, b.boundingBox.y + b.boundingBox.height); const intersection = Math.max(0, bx - ax) * Math.max(0, by - ay); const union = a.boundingBox.width * a.boundingBox.height + b.boundingBox.width * b.boundingBox.height - intersection; return union > 0 && intersection / union > 0.82; }
 export function mergeMissingRegions(inventory: VisualMealAnalysis, verification: CoverageVerification): FoodRegion[] { const merged = [...inventory.foodRegions]; for (const missing of verification.missingRegions) { if (!isRegionInsidePlate(missing, inventory.plateRegion) || merged.some((region) => sameRegion(region, missing))) continue; merged.push({ ...missing, id: merged.some((region) => region.id === missing.id) ? `missing-${missing.id}` : missing.id }); } return merged; }
+export function applyRegionCorrections(inventory: VisualMealAnalysis, verification: CoverageVerification): VisualMealAnalysis {
+  const corrections = verification.regionCorrections ?? [];
+  if (!corrections.length) return inventory;
+  const byId = new Map(corrections.map((region) => [region.id, region]));
+  return { ...inventory, foodRegions: inventory.foodRegions.map((region) => byId.get(region.id) ?? region) };
+}
 export function duplicateRegionIds(regions: FoodRegion[]): string[] { const duplicates = new Set<string>(); regions.forEach((region, index) => regions.slice(index + 1).forEach((other) => { if (sameRegion(region, other)) { duplicates.add(region.id); duplicates.add(other.id); } })); return [...duplicates]; }
 export function coverageNeedsRetry(inventory: VisualMealAnalysis, verification: CoverageVerification): boolean { return !verification.complete || verification.missingRegions.length > 0 || verification.inconsistentReferences.length > 0 || verification.duplicateRegionIds.length > 0 || duplicateRegionIds(inventory.foodRegions).length > 0; }
 // Decides whether visual coverage is incomplete and how duplicate or missing regions are merged.

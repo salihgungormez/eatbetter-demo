@@ -28,7 +28,7 @@ import {
 import { useMealStore } from '@/store/meal-store';
 import { candidateNutrition, regionTotals, regionsToMealItems } from '@/utils/food-regions';
 import { localizeFoodName } from '@/utils/localization';
-import { calculateCalloutLayout } from '@/utils/visual-review';
+import { calculateCalloutLayout, visualRegionAnchor } from '@/utils/visual-review';
 import {
   buildCorrections,
   personalizeRegions,
@@ -545,38 +545,41 @@ export default function AnalyzeScreen() {
             </View>
           );
         })}
-        {regions.map((region) => (
-          <TouchableOpacity
-            key={`anchor-${region.id}`}
-            accessibilityRole="button"
-            accessibilityLabel="Bu bölgenin ürün adını göster"
-            onPress={() => {
-              setActiveCalloutId(region.id);
-              setHighlightedRegionId(region.id);
-            }}
-            style={{
-              position: 'absolute',
-              left: imageRect.x + region.anchor.x * imageRect.width - 17,
-              top: imageRect.y + region.anchor.y * imageRect.height - 17,
-              width: 34,
-              height: 34,
-              borderRadius: 17,
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <View
-              style={{
-                width: 13,
-                height: 13,
-                borderRadius: 7,
-                backgroundColor: region.status === 'recognized' ? colors.mint : colors.orange,
-                borderWidth: 2,
-                borderColor: colors.ink,
+        {regions.map((region) => {
+          const marker = visualRegionAnchor(region) ?? region.anchor;
+          return (
+            <TouchableOpacity
+              key={`anchor-${region.id}`}
+              accessibilityRole="button"
+              accessibilityLabel="Bu bölgenin ürün adını göster"
+              onPress={() => {
+                setActiveCalloutId(region.id);
+                setHighlightedRegionId(region.id);
               }}
-            />
-          </TouchableOpacity>
-        ))}
+              style={{
+                position: 'absolute',
+                left: imageRect.x + marker.x * imageRect.width - 17,
+                top: imageRect.y + marker.y * imageRect.height - 17,
+                width: 34,
+                height: 34,
+                borderRadius: 17,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <View
+                style={{
+                  width: 13,
+                  height: 13,
+                  borderRadius: 7,
+                  backgroundColor: region.status === 'recognized' ? colors.mint : colors.orange,
+                  borderWidth: 2,
+                  borderColor: colors.ink,
+                }}
+              />
+            </TouchableOpacity>
+          );
+        })}
       </View>
       <Text style={{ color: colors.muted, fontSize: 12, textAlign: 'center', marginTop: 8 }}>
         {regions.length > 1

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { coverageNeedsRetry, duplicateRegionIds, mergeMissingRegions } from '@/utils/coverage';
+import { applyRegionCorrections, coverageNeedsRetry, duplicateRegionIds, mergeMissingRegions } from '@/utils/coverage';
 import { CoverageVerification } from '@/types/visual-meal-analysis';
 import { FoodRegion } from '@/types/meal';
 import { isRegionInsidePlate, regionTotals, selectCandidate } from '@/utils/food-regions';
@@ -20,6 +20,8 @@ assert.equal(unknown.status, 'unknown', 'unknown visible food remains a region')
 const duplicate = [food('a', 0.2, 0.2), { ...food('b', 0.2, 0.2), candidates: [food('b', 0.2, 0.2).candidates[0]] }];
 assert.equal(duplicateRegionIds(duplicate).length, 2, 'duplicate visual regions are detected');
 assert.equal(coverageNeedsRetry({ ...inventory, foodRegions: duplicate }, { complete: true, missingRegions: [], duplicateRegionIds: [], inconsistentReferences: [], notes: [] }), true, 'duplicate regions fail consistency validation');
+const corrected = applyRegionCorrections(inventory, { complete: true, missingRegions: [], regionCorrections: [{ ...inventory.foodRegions[0], boundingBox: { x: 0.7, y: 0.1, width: 0.2, height: 0.2 }, anchor: { x: 0.8, y: 0.2 } }], duplicateRegionIds: [], inconsistentReferences: [], notes: [] });
+assert.deepEqual(corrected.foodRegions[0].anchor, { x: 0.8, y: 0.2 }, 'verifier corrections should replace the same region coordinates');
 assert.equal(regionTotals([food('rice', 0.2, 0.2), unknown]).calories, 100, 'unresolved unknown region is not counted as selected nutrition');
 assert.equal(regionTotals([selectCandidate(unknown, 'not-found')]).calories, 0, 'unknown region cannot silently contribute nutrition');
 console.log('coverage pipeline: ok');

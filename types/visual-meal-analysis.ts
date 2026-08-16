@@ -10,6 +10,6 @@ const UncertaintyOptionSchema = z.object({ id: z.string(), label: z.string(), ca
 export const UncertaintyQuestionSchema = z.object({ id: z.string(), regionId: z.string().optional(), kind: z.enum(['ingredient', 'portion', 'hidden']), prompt: z.string(), reason: z.string(), options: z.array(UncertaintyOptionSchema).min(2).max(5) });
 export const VisualMealAnalysisSchema = z.object({ name: z.string(), mealType: z.enum(['breakfast', 'lunch', 'dinner', 'snack']), plateRegion: NormalizedBoundingBoxSchema, foodRegions: z.array(FoodRegionSchema), hiddenIngredientSuggestions: z.array(HiddenIngredientSuggestionSchema), uncertaintyQuestions: z.array(UncertaintyQuestionSchema).optional() });
 export type VisualMealAnalysis = z.infer<typeof VisualMealAnalysisSchema>;
-export const CoverageVerificationSchema = z.object({ complete: z.boolean(), missingRegions: z.array(FoodRegionSchema), duplicateRegionIds: z.array(z.string()), inconsistentReferences: z.array(z.string()), notes: z.array(z.string()) });
+export const CoverageVerificationSchema = z.object({ complete: z.boolean(), missingRegions: z.array(FoodRegionSchema), regionCorrections: z.array(FoodRegionSchema).optional(), duplicateRegionIds: z.array(z.string()), inconsistentReferences: z.array(z.string()), notes: z.array(z.string()) });
 export type CoverageVerification = z.infer<typeof CoverageVerificationSchema>;
 // Zod schemas and coverage models for safely validating Gemini responses.

@@ -15,10 +15,20 @@ export function mapNormalizedRegionToImage(region: NormalizedRegion, imageRect: 
   return { x: imageRect.x + safe.x * imageRect.width, y: imageRect.y + safe.y * imageRect.height, width: safe.width * imageRect.width, height: safe.height * imageRect.height };
 }
 
+// Use the visual region center for rendered markers so an unreliable model anchor
+// cannot move a callout to another food while the region itself remains correct.
+export function visualRegionAnchor(region: { boundingBox?: NormalizedRegion; anchor?: { x: number; y: number } }) {
+  if (region.boundingBox) {
+    const safe = clampRegion(region.boundingBox);
+    return { x: safe.x + safe.width / 2, y: safe.y + safe.height / 2 };
+  }
+  return region.anchor;
+}
+
 export function calculateCalloutLayout(items: Array<{ id: string; anchor?: { x: number; y: number }; boundingBox?: NormalizedRegion; regions?: NormalizedRegion[] }>, container: { width: number; height: number }, imageRect: ImageRect, cardWidth = 132, cardHeight = 54): CalloutLayout[] {
   const placed = items.map((item) => {
     const region = item.boundingBox ?? item.regions?.[0];
-    const anchor = item.anchor ?? (region ? { x: region.x + region.width / 2, y: region.y + region.height / 2 } : undefined);
+    const anchor = visualRegionAnchor({ boundingBox: region, anchor: item.anchor });
     if (!anchor) return undefined;
     const anchorX = imageRect.x + Math.max(0, Math.min(1, anchor.x)) * imageRect.width;
     const anchorY = imageRect.y + Math.max(0, Math.min(1, anchor.y)) * imageRect.height;
